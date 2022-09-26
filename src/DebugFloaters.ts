@@ -32,7 +32,10 @@ function getParentMetadata(target: any, key: string): ParentMetadata {
 type RecursePropertiesCallback = (obj: { [k: string]: any }, paramName: string, labelName: string, parentMetadata: ParentMetadata | null) => boolean;
 function recurseBindProperties(cb: RecursePropertiesCallback, obj: { [k: string]: any }, parentName: string = '', parentMetadata: ParentMetadata | null = null): void {
     for (const keyName in obj) {
-        const labelName = `${parentName}.${keyName}`;
+        let labelName = Reflect.getMetadata(`df:label`, obj, keyName);
+        if (labelName === undefined)
+            labelName = `${parentName}.${keyName}`;
+
         if (!cb(obj, keyName, labelName, parentMetadata))
             continue;
         if (typeof obj[keyName] === 'object' && !!obj[keyName])
@@ -87,7 +90,7 @@ class FloaterControlHandlerValue {
         this.updateInterval = setInterval(() => {
             if (this.obj[this.paramName] !== this.lastValue)
                 this.update();
-        }, 100);
+        }, 10);
     }
 
     public setValue(value: number): void {
@@ -295,7 +298,28 @@ export class FloatingPanel implements Widget {
         this.contents.appendChild(cb.elem);
     }
 
-    public bindSingleSlider(labelName: string, obj: any, paramName: string, parentMetadata: ParentMetadata | null = null, midiControls: GlobalMIDIControls | null = null): void {
+    public bindButton(labelName: string, obj: any, paramName: string): void {
+        let value = obj[paramName];
+        assert(typeof value === "function");
+
+        let labelNameMetadata = Reflect.getMetadata('df:label', obj, paramName);
+        if (labelNameMetadata !== undefined)
+            labelName = labelNameMetadata;
+
+        const button = document.createElement('div');
+        button.style.fontWeight = `bold`;
+        button.style.textAlign = `center`;
+        button.style.lineHeight = `24px`;
+        button.style.cursor = `pointer`;
+        button.textContent = labelName;
+        button.onclick = () => {
+            value.call(obj);
+        };
+
+        this.contents.appendChild(button);
+    }
+
+    public bindSlider(labelName: string, obj: any, paramName: string, parentMetadata: ParentMetadata | null = null, midiControls: GlobalMIDIControls | null = null): void {
         let value = obj[paramName];
         assert(typeof value === "number");
 
@@ -313,6 +337,10 @@ export class FloatingPanel implements Widget {
             }
     
             slider.setLabel(`${labelName} = ${valueStr}`);
+
+            let changedCallback = Reflect.getMetadata('df:changedcallback', obj, paramName);
+            if (changedCallback)
+                changedCallback.call(obj);
         };
 
         let usePercent = Reflect.getMetadata('df:usepercent', obj, paramName);
@@ -394,7 +422,7 @@ export class FloatingPanel implements Widget {
             target = target[args[i]];
         }
 
-        this.bindSingleSlider(labelName, target, args[args.length - 1], parentMetadata);
+        this.bindSlider(labelName, target, args[args.length - 1], parentMetadata);
     }
 }
 
@@ -437,35 +465,39 @@ export class DebugFloaterHolder {
         this.debugFloater = null;
     }
 
-    private _bindPanelRecurse(obj: { [k: string]: any }, panel: FloatingPanel, parentName: string, parentMetadata: any | null = null): void {
-        // Children are by default invisible, unless we're in a color, or some sort of number array.
-        const childDefaultVisible = objIsColor(obj) || (obj instanceof Array) || (obj instanceof Float32Array);
-
-        const keys = Object.keys(obj);
-
-        for (let i = 0; i < keys.length; i++) {
-            const keyName = keys[i];
-            if (!(childDefaultVisible || dfShouldShowOwn(obj, keyName)))
-                continue;
-            const v = obj[keyName];
-
-            if (typeof v === "number")
-                panel.bindSingleSlider(`${parentName}.${keyName}`, obj, keyName, parentMetadata, this.midiControls);
-            else if (typeof v === "boolean")
-                panel.bindCheckbox(`${parentName}.${keyName}`, obj, keyName);;
-
-            this._bindPanelRecurse(v, panel, `${parentName}.${keyName}`, getParentMetadata(obj, keyName));
-        }
-    }
-
-    public bindPanel(obj: { [k: string]: any }, panel: FloatingPanel | null = null): void {
+    public bindPanel(obj: { [k: string]: any }, panel_: FloatingPanel | null = null): void {
+        let panel = panel_!;
         if (panel === null)
             panel = this.getDebugFloater();
 
         while (panel.contents.firstChild)
             panel.contents.removeChild(panel.contents.firstChild);
 
-        this._bindPanelRecurse(obj, panel, '');
+        recurseBindProperties((obj, keyName, labelName, parentMetadata) => {
+            // Children are by default invisible, unless we're in a color, or some sort of number array.
+            const childDefaultVisible = objIsColor(obj) || (obj instanceof Array) || (obj instanceof Float32Array);
+
+            if (!(childDefaultVisible || dfShouldShowOwn(obj, keyName)))
+                return false;
+
+            const v = obj[keyName];
+
+            if (typeof v === "number")
+                panel.bindSlider(labelName, obj, keyName, parentMetadata, this.midiControls);
+            else if (typeof v === "boolean")
+                panel.bindCheckbox(labelName, obj, keyName);
+            else if (typeof v === "function")
+                panel.bindButton(labelName, obj, keyName);
+
+            return true;
+        }, obj);
+
+        recurseAllPrototypeFunctions((proto, keyName) => {
+            if (!dfShouldShowOwn(obj, keyName) && !dfShouldShowOwn(proto, keyName))
+                return;
+
+            panel.bindButton(keyName, obj, keyName);
+        }, obj);
     }
 }
 
@@ -536,22 +568,24 @@ interface MidiMetadata {
     callback?: boolean;
 }
 
-function recurseAllPrototypeFunctions(cb: (obj: any, keyName: string) => void, obj: any): void {
+function recurseAllPrototypeFunctions(cb: (proto: any, keyName: string) => void, obj: any): void {
     if (obj === null)
         return;
     const props = Object.getOwnPropertyNames(obj);
     for (const keyName of props) {
-        if (!(obj[keyName] instanceof Function))
+        const desc = Object.getOwnPropertyDescriptor(obj, keyName);
+        if (desc === undefined)
+            continue;
+        if (desc.value === undefined || typeof desc.value !== 'function')
             continue;
         cb(obj, keyName);
     }
     recurseAllPrototypeFunctions(cb, Object.getPrototypeOf(obj));
 }
 
-class MIDIDevicePair {
-    public midiOutput: WebMidi.MIDIOutput | null = null;
+class MIDIDevice {
     private boundControls: BoundMIDIControl[] = [];
-    public oncontrolmessage: ((pair: MIDIDevicePair, boundControl: BoundMIDIControl | null, channel: number, controlNumber: number, value: number | null) => void) | null = null;
+    public oncontrolmessage: ((device: MIDIDevice, boundControl: BoundMIDIControl | null, channel: number, controlNumber: number, value: number | null) => void) | null = null;
 
     constructor(public midiInput: WebMidi.MIDIInput) {
         this.midiInput.onmidimessage = this.onMessage;
@@ -598,7 +632,7 @@ class MIDIDevicePair {
 type BoundMIDIControl = BoundMIDIControlValue | BoundMIDIControlButton;
 class GlobalMIDIControls {
     private midiAccess: WebMidi.MIDIAccess | null = null;
-    private devicePairs: MIDIDevicePair[] = [];
+    private devices: MIDIDevice[] = [];
 
     public async init() {
         if (navigator.requestMIDIAccess === undefined)
@@ -616,22 +650,15 @@ class GlobalMIDIControls {
     }
 
     private scanDevices(): void {
-        const newDevicePairs: MIDIDevicePair[] = [];
         const inputs = [...this.midiAccess!.inputs.values()];
-        const outputs = [...this.midiAccess!.outputs.values()];
-
         for (const input of inputs) {
-            let devicePair = this.devicePairs.find((pair) => pair.midiInput === input);
-            if (devicePair === undefined)
-                devicePair = new MIDIDevicePair(input);
-            devicePair.oncontrolmessage = this.onControlMessage;
-            newDevicePairs.push(devicePair);
-
-            const output = nullify(outputs.find((output) => output.manufacturer === input.manufacturer && output.name === input.name));
-            arrayRemove(outputs, output);
-            devicePair.midiOutput = output;
+            let device = this.devices.find((device) => device.midiInput === input);
+            if (device === undefined) {
+                device = new MIDIDevice(input);
+                device.oncontrolmessage = this.onControlMessage;
+                this.devices.push(device);
+            }
         }
-        this.devicePairs = newDevicePairs;
     }
 
     private nextListener: MIDIControlListenerValue | null = null;
@@ -645,13 +672,13 @@ class GlobalMIDIControls {
     }
 
     private log = false;
-    private onControlMessage = (devicePair: MIDIDevicePair, boundControl: BoundMIDIControl | null, channel: number, controlNumber: number, value: number | null): void => {
+    private onControlMessage = (device: MIDIDevice, boundControl: BoundMIDIControl | null, channel: number, controlNumber: number, value: number | null): void => {
         if (this.log) console.log(channel, controlNumber, value);
 
         if (this.nextListener !== null) {
             // Transfer to the bind control. Create if needed.
             if (boundControl === null) {
-                boundControl = devicePair.bindValueListener(channel, controlNumber, this.nextListener);
+                boundControl = device.bindValueListener(channel, controlNumber, this.nextListener);
             } else if (boundControl instanceof BoundMIDIControlValue) {
                 boundControl.bindListener(this.nextListener);
             }
@@ -673,9 +700,9 @@ class GlobalMIDIControls {
     }
 
     public bindObject(obj: { [k: string]: any }): void {
-        // Take the first device-pair that we have...
-        const devicePair = this.devicePairs[0];
-        if (devicePair === undefined)
+        // Bind the first device that we have...
+        const device = this.devices[0];
+        if (device === undefined)
             return;
 
         recurseBindProperties((obj, keyName, labelName, parentMetadata) => {
@@ -686,14 +713,14 @@ class GlobalMIDIControls {
             const controlNumber = this.getControlNumber(midi);
             if (midi.kind === 'knob' || midi.kind === 'slider') {
                 const handler = new FloaterControlHandlerValue(obj, keyName, parentMetadata);
-                devicePair.bindValueListener(midi.channel, controlNumber, handler.midiListener);
+                device.bindValueListener(midi.channel, controlNumber, handler.midiListener);
             } else if (midi.kind === 'button') {
                 assert(!midi.callback);
                 const listener: MIDIControlListenerButton = {
                     ondown: () => { obj[keyName] = true; },
                     onup: () => { obj[keyName] = false; },
                 }
-                devicePair.bindButtonListener(midi.channel, controlNumber, listener);
+                device.bindButtonListener(midi.channel, controlNumber, listener);
             }
 
             return true;
@@ -710,12 +737,12 @@ class GlobalMIDIControls {
                 const listener: MIDIControlListenerValue = {
                     onvalue: (t) => { proto[keyName].call(obj, t); },
                 };
-                devicePair.bindValueListener(midi.channel, controlNumber, listener);
+                device.bindValueListener(midi.channel, controlNumber, listener);
             } else if (midi.kind === 'button') {
                 const listener: MIDIControlListenerButton = {
                     ondown: () => { proto[keyName].call(obj); },
                 }
-                devicePair.bindButtonListener(midi.channel, controlNumber, listener);
+                device.bindButtonListener(midi.channel, controlNumber, listener);
             }
         }, obj);
     }
@@ -743,6 +770,10 @@ export function dfUsePercent(v: boolean = true) {
 
 export function dfLabel(v: string) {
     return Reflect.metadata('df:label', v);
+}
+
+export function dfChangedCallback(v: () => void) {
+    return Reflect.metadata('df:changedcallback', v);
 }
 
 export function dfBindMidiValue(kind: 'knob' | 'slider', index: number, channel: number = 0) {

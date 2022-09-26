@@ -1,5 +1,5 @@
 
-import { mat4, ReadonlyMat4, vec3, vec4 } from "gl-matrix";
+import { mat4, quat, ReadonlyMat4, vec3, vec4 } from "gl-matrix";
 import ArrayBufferSlice from "../ArrayBufferSlice";
 import BitMap from "../BitMap";
 import { Camera, CameraController, computeViewSpaceDepthFromWorldSpacePoint } from "../Camera";
@@ -34,6 +34,7 @@ import { LuminanceHistogram } from "./LuminanceHistogram";
 import { fillColor, fillVec4 } from "../gfx/helpers/UniformBufferHelpers";
 import { drawWorldSpaceAABB, getDebugOverlayCanvas2D } from "../DebugJunk";
 import { dfRange, dfShow } from "../DebugFloaters";
+import { GMA } from "./GMA";
 
 export class LooseMount {
     constructor(public path: string, public files: string[] = []) {
@@ -58,6 +59,7 @@ export class SourceFileSystem {
     public zip: ZipFile[] = [];
     public vpk: VPKMount[] = [];
     public loose: LooseMount[] = [];
+    public gma: GMA[] = [];
 
     constructor(private dataFetcher: DataFetcher) {
     }
@@ -79,6 +81,12 @@ export class SourceFileSystem {
         const zip = parseZipFile(data);
         normalizeZip(zip);
         this.zip.push(zip);
+    }
+
+    public async createGMAMount(path: string) {
+        const data = await this.dataFetcher.fetchData(path);
+        const gma = new GMA(data);
+        this.gma.push(gma);
     }
 
     public resolvePath(path: string, ext: string): string {
@@ -152,6 +160,13 @@ export class SourceFileSystem {
                 return true;
         }
 
+        for (let i = 0; i < this.gma.length; i++) {
+            const gma = this.gma[i];
+            const entry = gma.files.find((entry) => entry.filename === resolvedPath);
+            if (entry !== undefined)
+                return true;
+        }
+
         return false;
     }
 
@@ -180,6 +195,13 @@ export class SourceFileSystem {
             const entry = zip.find((entry) => entry.filename === resolvedPath);
             if (entry !== undefined)
                 return decompressZipFileEntry(entry);
+        }
+
+        for (let i = 0; i < this.gma.length; i++) {
+            const gma = this.gma[i];
+            const entry = gma.files.find((entry) => entry.filename === resolvedPath);
+            if (entry !== undefined)
+                return entry.data;
         }
 
         return null;
@@ -279,6 +301,7 @@ export class SkyboxRenderer {
     private async createMaterialInstance(renderContext: SourceRenderContext, path: string): Promise<BaseMaterial> {
         const materialCache = renderContext.materialCache;
         const materialInstance = await materialCache.createMaterialInstance(path);
+        materialInstance.hasVertexColorInput = false;
         await materialInstance.init(renderContext);
         return materialInstance;
     }
@@ -994,10 +1017,20 @@ class Flashlight {
     @dfShow()
     @dfRange(0.1, 10.0)
     private aspect = 1.0;
+    @dfShow()
+    @dfRange(0.01, 30.0)
+    private speed = 10.0;
+
+    private currentAngle = quat.create();
 
     constructor(renderContext: SourceRenderContext) {
         this.fetchTexture(renderContext, 'effects/flashlight001');
         this.projectedLightRenderer.light.farZ = 1000;
+    }
+
+    public reset(renderContext: SourceRenderContext): void {
+        const worldFromViewMatrix = renderContext.currentView.worldFromViewMatrix;
+        mat4.getRotation(this.currentAngle, worldFromViewMatrix);
     }
 
     public isReady(): boolean {
@@ -1010,11 +1043,17 @@ class Flashlight {
     }
 
     private updateFrustumView(renderContext: SourceRenderContext): void {
-        const frustumView = this.projectedLightRenderer.light.frustumView;
         const worldFromViewMatrix = renderContext.currentView.worldFromViewMatrix;
 
+        mat4.getTranslation(scratchVec3, worldFromViewMatrix);
+        mat4.getRotation(scratchQuat, worldFromViewMatrix);
+        quat.slerp(this.currentAngle, this.currentAngle, scratchQuat, renderContext.globalDeltaTime * this.speed);
+
+        const frustumView = this.projectedLightRenderer.light.frustumView;
+        mat4.fromRotationTranslation(frustumView.worldFromViewMatrix, this.currentAngle, scratchVec3);
+
         // Move the flashlight in front of us a bit to provide a bit of cool perspective...
-        mat4.translate(frustumView.worldFromViewMatrix, worldFromViewMatrix, this.offset);
+        mat4.translate(frustumView.worldFromViewMatrix, frustumView.worldFromViewMatrix, this.offset);
         mat4.invert(frustumView.viewFromWorldMatrix, frustumView.worldFromViewMatrix);
 
         calcFrustumViewProjection(frustumView, renderContext, this.fovY, this.aspect, this.nearZ, this.projectedLightRenderer.light.farZ);
@@ -1052,7 +1091,6 @@ export class SourceRenderContext {
     public renderCache: GfxRenderCache;
     public currentPointCamera: point_camera | null = null;
     public currentShake: env_shake | null = null;
-    public flashlight: Flashlight;
 
     // Public settings
     public enableFog = true;
@@ -1076,7 +1114,6 @@ export class SourceRenderContext {
         this.materialCache = new MaterialCache(device, this.renderCache, this.filesystem);
         this.studioModelCache = new StudioModelCache(this, this.filesystem);
         this.colorCorrection = new SourceColorCorrection(device, this.renderCache);
-        this.flashlight = new Flashlight(this);
 
         if (!this.device.queryLimits().occlusionQueriesRecommended) {
             // Disable auto-exposure system on backends where we shouldn't use occlusion queries.
@@ -1151,6 +1188,8 @@ export class SourceWorldViewRenderer {
     public outputColorTargetID: GfxrRenderTargetID | null = null;
     public outputColorTextureID: GfxrResolveTextureID | null = null;
 
+    public flashlight: Flashlight | null = null;
+
     constructor(public name: string, viewType: SourceEngineViewType) {
         this.mainView.viewType = viewType;
         this.skyboxView.viewType = viewType;
@@ -1181,13 +1220,13 @@ export class SourceWorldViewRenderer {
             }
         }
 
-        const renderContext = renderer.renderContext, flashlight = renderContext.flashlight;
-        if (bestProjectedLight === null && flashlight.enabled) {
+        const renderContext = renderer.renderContext;
+        if (bestProjectedLight === null && this.flashlight !== null && this.flashlight.enabled) {
             renderContext.currentView = this.mainView;
-            flashlight.movement(renderContext);
+            this.flashlight.movement(renderContext);
             renderContext.currentView = null!;
-            if (flashlight.isReady())
-                bestProjectedLight = flashlight.projectedLightRenderer;
+            if (this.flashlight.isReady())
+                bestProjectedLight = this.flashlight.projectedLightRenderer;
         }
 
         this.currentProjectedLightRenderer = bestProjectedLight;
@@ -1397,6 +1436,7 @@ export class SourceWorldViewRenderer {
 
 const scratchVec3 = vec3.create();
 const scratchVec4a = vec4.create(), scratchVec4b = vec4.create();
+const scratchQuat = quat.create();
 const scratchMatrix = mat4.create();
 const scratchPlane = new Plane();
 
@@ -1465,6 +1505,10 @@ void main() {
         this.setDefineBool('USE_BLOOM', useBloom);
     }
 }
+
+const bindingLayoutsBloom: GfxBindingLayoutDescriptor[] = [
+    { numUniformBuffers: 1, numSamplers: 1, },
+];
 
 class BloomDownsampleProgram extends DeviceProgram {
     public override both = `
@@ -1632,20 +1676,26 @@ export class SourceRenderer implements SceneGfx {
     private processInput(): void {
         if (this.sceneContext.inputManager.isKeyDownEventTriggered('KeyF')) {
             // happy birthday shigeru miyamoto
-            this.renderContext.flashlight.enabled = !this.renderContext.flashlight.enabled;
+            if (this.mainViewRenderer.flashlight === null)
+                this.mainViewRenderer.flashlight = new Flashlight(this.renderContext);
+
+            const flashlight = this.mainViewRenderer.flashlight;
+            flashlight.enabled = !flashlight.enabled;
+            if (flashlight.enabled)
+                flashlight.reset(this.renderContext);
         }
     }
 
     private movement(): void {
         // Update render context.
 
-        this.processInput();
-
         // TODO(jstpierre): The world lighting state should probably be moved to the BSP? Or maybe SourceRenderContext is moved to the BSP...
         this.renderContext.worldLightingState.update(this.renderContext.globalTime);
 
         // Update BSP (includes entities).
         this.renderContext.currentView = this.mainViewRenderer.mainView;
+
+        this.processInput();
 
         for (let i = 0; i < this.bspRenderers.length; i++)
             this.bspRenderers[i].movement(this.renderContext);
@@ -1845,7 +1895,7 @@ export class SourceRenderer implements SceneGfx {
         const staticResources = this.renderContext.materialCache.staticResources;
 
         const renderInst = renderInstManager.newRenderInst();
-        renderInst.setBindingLayouts(bindingLayoutsPost);
+        renderInst.setBindingLayouts(bindingLayoutsBloom);
         renderInst.setInputLayoutAndState(null, null);
         renderInst.setMegaStateFlags(fullscreenMegaState);
         renderInst.drawPrimitives(3);
@@ -1871,7 +1921,7 @@ export class SourceRenderer implements SceneGfx {
 
             pass.exec((passRenderer, scope) => {
                 this.resetTextureMappings();
-        
+
                 renderInst.setGfxProgram(this.bloomDownsampleProgram);
                 this.textureMapping[0].gfxTexture = scope.getResolveTextureForID(mainColorResolveTextureID);
                 this.textureMapping[0].gfxSampler = staticResources.linearClampSampler;

@@ -55,8 +55,9 @@ import { MapPartsRailGuideHolder } from './MapParts';
 import { LensFlareDirector, DrawSyncManager } from './Actors/LensFlare';
 import { NPCDirector } from './Actors/NPC';
 import { GalaxyMapController } from './Actors/GalaxyMap';
-import { TakoHeiInkHolder } from './Actors/Enemy';
+import { KameckBeamHolder, KameckBeamTurtleHolder, KameckFireBallHolder, TakoHeiInkHolder } from './Actors/Enemy';
 import { dfLabel, dfShow } from '../DebugFloaters';
+import { makeSolidColorTexture2D } from '../gfx/helpers/TextureHelpers';
 
 // Galaxy ticks at 60fps.
 export const FPS = 60;
@@ -77,12 +78,14 @@ function isExistPriorDrawAir(sceneObjHolder: SceneObjHolder): boolean {
 export const enum SpecialTextureType {
     OpaqueSceneTexture = 'opaque-scene-texture',
     AstroMapBoard = 'astro-map-board',
+    MarioShadowTexture = `mario-shadow-texture`,
 }
 
 class SpecialTextureBinder {
     private clampSampler: GfxSampler;
     private textureMapping = new Map<SpecialTextureType, TextureMapping>();
     private needsFlipY = false;
+    private transparentTexture: GfxTexture;
 
     constructor(device: GfxDevice, cache: GfxRenderCache) {
         this.clampSampler = cache.createSampler({
@@ -97,6 +100,10 @@ class SpecialTextureBinder {
 
         this.registerSpecialTextureType(SpecialTextureType.OpaqueSceneTexture, this.clampSampler);
         this.registerSpecialTextureType(SpecialTextureType.AstroMapBoard, this.clampSampler);
+        this.registerSpecialTextureType(SpecialTextureType.MarioShadowTexture, this.clampSampler);
+
+        this.transparentTexture = makeSolidColorTexture2D(device, TransparentBlack);
+        this.lateBindTexture(SpecialTextureType.MarioShadowTexture, this.transparentTexture);
 
         this.needsFlipY = gfxDeviceNeedsFlipY(device);
     }
@@ -121,6 +128,10 @@ class SpecialTextureBinder {
     public resolveLateBindTexture(list: GfxRenderInstList): void {
         for (const [textureType, textureMapping] of this.textureMapping.entries())
             list.resolveLateSamplerBinding(textureType, textureMapping);
+    }
+
+    public destroy(device: GfxDevice): void {
+        device.destroyTexture(this.transparentTexture);
     }
 }
 
@@ -485,6 +496,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
                 this.drawOpa(passRenderer, DrawBufferType.NoSilhouettedMapObj);
                 this.drawOpa(passRenderer, DrawBufferType.NoSilhouettedMapObjWeakLight);
                 this.drawOpa(passRenderer, DrawBufferType.NoSilhouettedMapObjStrongLight);
+                this.drawOpa(passRenderer, DrawBufferType.Player);
                 this.drawOpa(passRenderer, DrawBufferType.Npc);
                 this.drawOpa(passRenderer, DrawBufferType.Ride);
                 this.drawOpa(passRenderer, DrawBufferType.Enemy);
@@ -528,6 +540,7 @@ export class SMGRenderer implements Viewer.SceneGfx {
                 this.drawXlu(passRenderer, DrawBufferType.NoSilhouettedMapObj);
                 this.drawXlu(passRenderer, DrawBufferType.NoSilhouettedMapObjWeakLight);
                 this.drawXlu(passRenderer, DrawBufferType.NoSilhouettedMapObjStrongLight);
+                this.drawXlu(passRenderer, DrawBufferType.Player);
                 this.drawXlu(passRenderer, DrawBufferType.Npc);
                 this.drawXlu(passRenderer, DrawBufferType.Ride);
                 this.drawXlu(passRenderer, DrawBufferType.Enemy);
@@ -1102,6 +1115,9 @@ export class SceneObjHolder {
     public coinRotater: CoinRotater | null = null;
     public airBubbleHolder: AirBubbleHolder | null = null;
     public starPieceDirector: StarPieceDirector | null = null;
+    public kameckBeamHolder: KameckBeamHolder | null = null;
+    public kameckFireBallHolder: KameckFireBallHolder | null = null;
+    public kameckBeamTurtleHolder: KameckBeamTurtleHolder | null = null;
     public takoHeiInkHolder: TakoHeiInkHolder | null = null;
     public shadowControllerHolder: ShadowControllerHolder | null = null;
     public swingRopeGroup: SwingRopeGroup | null = null;
@@ -1192,6 +1208,12 @@ export class SceneObjHolder {
             return this.airBubbleHolder;
         else if (sceneObj === SceneObj.StarPieceDirector)
             return this.starPieceDirector;
+        else if (sceneObj === SceneObj.KameckBeamHolder)
+            return this.kameckBeamHolder;
+        else if (sceneObj === SceneObj.KameckFireBallHolder)
+            return this.kameckFireBallHolder;
+        else if (sceneObj === SceneObj.KameckBeamTurtleHolder)
+            return this.kameckBeamTurtleHolder;
         else if (sceneObj === SceneObj.TakoHeiInkHolder)
             return this.takoHeiInkHolder;
         else if (sceneObj === SceneObj.ShadowControllerHolder)
@@ -1278,6 +1300,12 @@ export class SceneObjHolder {
             this.airBubbleHolder = new AirBubbleHolder(this);
         else if (sceneObj === SceneObj.StarPieceDirector)
             this.starPieceDirector = new StarPieceDirector(this);
+        else if (sceneObj === SceneObj.KameckBeamHolder)
+            this.kameckBeamHolder = new KameckBeamHolder(this);
+        else if (sceneObj === SceneObj.KameckFireBallHolder)
+            this.kameckFireBallHolder = new KameckFireBallHolder(this);
+        else if (sceneObj === SceneObj.KameckBeamTurtleHolder)
+            this.kameckBeamTurtleHolder = new KameckBeamTurtleHolder(this);
         else if (sceneObj === SceneObj.TakoHeiInkHolder)
             this.takoHeiInkHolder = new TakoHeiInkHolder(this);
         else if (sceneObj === SceneObj.ShadowControllerHolder)
@@ -1326,6 +1354,7 @@ export class SceneObjHolder {
     public destroy(device: GfxDevice): void {
         this.nameObjHolder.destroy(device);
         this.drawSyncManager.destroy(device);
+        this.specialTextureBinder.destroy(device);
     }
 }
 
@@ -1744,8 +1773,7 @@ export abstract class SMGSceneDescBase implements Viewer.SceneDesc {
         sceneObjHolder.sceneDesc = this;
         sceneObjHolder.modelCache = modelCache;
         sceneObjHolder.uiContainer = context.uiContainer;
-        // TODO(jstpierre): This is ugly.
-        sceneObjHolder.viewerInput = window.main.viewer.viewerRenderInput;
+        sceneObjHolder.viewerInput = context.viewerInput;
         sceneObjHolder.deltaTimeFrames = sceneObjHolder.deltaTimeFrames;
         sceneObjHolder.specialTextureBinder = new SpecialTextureBinder(device, renderHelper.getCache());
         sceneObjHolder.requestArchives();

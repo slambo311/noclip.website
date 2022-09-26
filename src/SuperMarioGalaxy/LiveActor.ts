@@ -999,6 +999,10 @@ export class LiveActor<TNerve extends number = number> extends NameObj {
         if (indDummy !== null)
             sceneObjHolder.specialTextureBinder.registerTextureMapping(indDummy, SpecialTextureType.OpaqueSceneTexture);
 
+        const shadowProjDummy = this.modelInstance.getTextureMappingReference('ShadowProjDummy');
+        if (shadowProjDummy !== null)
+            sceneObjHolder.specialTextureBinder.registerTextureMapping(shadowProjDummy, SpecialTextureType.MarioShadowTexture);
+
         if (this.actorLightCtrl !== null) {
             this.actorLightCtrl.loadLight(this.modelInstance, camera);
         } else {
@@ -1045,7 +1049,7 @@ export class LiveActor<TNerve extends number = number> extends NameObj {
     private updateBinder(sceneObjHolder: SceneObjHolder, deltaTimeFrames: number): void {
         if (this.binder !== null) {
             if (this.calcBinderFlag) {
-                this.binder.bind(sceneObjHolder, scratchVec3a, this.velocity);
+                this.binder.bind(sceneObjHolder, scratchVec3a, this.velocity, deltaTimeFrames);
                 vec3.add(this.translation, this.translation, scratchVec3a);
             } else {
                 vec3.scaleAndAdd(this.translation, this.translation, this.velocity, deltaTimeFrames);

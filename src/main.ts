@@ -84,6 +84,7 @@ import * as Scenes_JetSetRadio from './JetSetRadio/Scenes';
 import * as Scenes_Subnautica from './Subnautica/scenes';
 import * as Scenes_Glover from './Glover/scenes';
 import * as Scenes_HalfLife from './GoldSrc/Scenes_HalfLife';
+import * as Scenes_SuperMonkeyBall from './SuperMonkeyBall/Scenes_SuperMonkeyBall';
 
 import { DroppedFileSceneDesc, traverseFileSystemDataTransfer } from './Scenes_FileDrops';
 
@@ -98,7 +99,6 @@ import { RenderStatistics } from './RenderStatistics';
 import { Color } from './Color';
 import { standardFullClearRenderPassDescriptor } from './gfx/helpers/RenderGraphHelpers';
 
-import * as Sentry from '@sentry/browser';
 import { GIT_REVISION, IS_DEVELOPMENT } from './BuildVersion';
 import { SceneDesc, SceneGroup, SceneContext, Destroyable } from './SceneBase';
 import { prepareFrameDebugOverlayCanvas2D } from './DebugJunk';
@@ -129,6 +129,7 @@ const sceneGroups = [
     Scenes_PaperMario_TheThousandYearDoor.sceneGroup,
     Scenes_Pikmin2.sceneGroup,
     Scenes_StarFoxAdventures.sceneGroup,
+    Scenes_SuperMonkeyBall.sceneGroup,
     Scenes_SuperMarioSunshine.sceneGroup,
     Scenes_Zelda_TwilightPrincess.sceneGroup,
     Scenes_Zelda_TheWindWaker.sceneGroup,
@@ -369,26 +370,6 @@ class Main {
         }
 
         this._onRequestAnimationFrameCanvas();
-
-        if (!IS_DEVELOPMENT) {
-            Sentry.init({
-                dsn: 'https://a3b5f6c50bc04555835f9a83d6e76b23@sentry.io/1448331',
-                beforeSend: (event) => {
-                    // Filter out aborted XHRs.
-                    if (event.exception!.values!.length) {
-                        const exc = event.exception!.values![0];
-                        if (exc.type === 'AbortedError')
-                            return null;
-                    }
-
-                    return event;
-                },
-            });
-
-            Sentry.configureScope((scope) => {
-                scope.setExtra('git-revision', GIT_REVISION);
-            });
-        }
     }
 
     private _onHashChange(): void {
@@ -436,6 +417,8 @@ class Main {
             this.ui.togglePlayPause(false);
             this.isFrameStep = true;
         }
+        if (inputManager.isKeyDownEventTriggered('F9'))
+            this._loadSceneDesc(this.currentSceneGroup!, this.currentSceneDesc!, this._getSceneSaveState(), true);
     }
 
     private async _onWebXRStateRequested(state: boolean) {
@@ -736,9 +719,9 @@ class Main {
 
     private loadSceneDelta = 1;
 
-    private _loadSceneDesc(sceneGroup: SceneGroup, sceneDesc: SceneDesc, sceneStateStr: string | null = null): void {
-        if (this.currentSceneDesc === sceneDesc) {
-            this._loadSceneSaveState(sceneStateStr);
+    private _loadSceneDesc(sceneGroup: SceneGroup, sceneDesc: SceneDesc, sceneStateStr: string | null = null, force: boolean = false): void {
+        if (this.currentSceneDesc === sceneDesc && !force) {
+            this._loadSceneSaveState(sceneStateStr)
             return;
         }
 
@@ -773,8 +756,9 @@ class Main {
         const destroyablePool: Destroyable[] = this.destroyablePool;
         const inputManager = this.viewer.inputManager;
         inputManager.reset();
+        const viewerInput = this.viewer.viewerRenderInput;
         const context: SceneContext = {
-            device, dataFetcher, dataShare, uiContainer, destroyablePool, inputManager,
+            device, dataFetcher, dataShare, uiContainer, destroyablePool, inputManager, viewerInput,
         };
 
         // The age delta on pruneOldObjects determines whether any resources will be shared at all.
@@ -807,17 +791,6 @@ class Main {
 
         // Set window title.
         document.title = `${sceneDesc.name} - ${sceneGroup.name} - noclip`;
-
-        const sceneDescId = this._getCurrentSceneDescId()!;
-
-        Sentry.addBreadcrumb({
-            category: 'loadScene',
-            message: sceneDescId,
-        });
-
-        Sentry.configureScope((scope) => {
-            scope.setExtra('sceneDescId', sceneDescId);
-        });
     }
 
     private _loadSceneGroups() {
