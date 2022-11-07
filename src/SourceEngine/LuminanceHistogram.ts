@@ -1,6 +1,5 @@
 
 import { vec4 } from "gl-matrix";
-import { IS_DEVELOPMENT } from "../BuildVersion";
 import { Color, colorLerp, colorNewCopy, colorToCSS, Cyan, Green, Red, White } from "../Color";
 import { drawScreenSpaceText, getDebugOverlayCanvas2D } from "../DebugJunk";
 import { fullscreenMegaState } from "../gfx/helpers/GfxMegaStateDescriptorHelpers";
@@ -121,7 +120,7 @@ export class LuminanceHistogram {
     private toneMapScaleHistory: number[] = [];
     private toneMapScaleHistoryCount = 10;
 
-    public debugDrawHistogram: boolean = IS_DEVELOPMENT;
+    public debugDrawHistogram: boolean = false;
     public debugDrawSquares: boolean = false;
 
     constructor(cache: GfxRenderCache) {
@@ -479,7 +478,7 @@ export class LuminanceHistogram {
                 const renderInst = renderInstManager.newRenderInst();
                 renderInst.setGfxProgram(this.gfxProgram);
                 renderInst.setMegaStateFlags(fullscreenMegaState);
-                renderInst.setBindingLayouts([{ numSamplers: 1, numUniformBuffers: 0 }]);
+                renderInst.setBindingLayouts([{ numSamplers: 1, numUniformBuffers: 1 }]);
                 renderInst.drawPrimitives(3);
 
                 let offs = renderInst.allocateUniformBuffer(0, 8);
