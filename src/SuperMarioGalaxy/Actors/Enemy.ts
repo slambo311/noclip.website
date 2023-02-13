@@ -1090,7 +1090,7 @@ function trySetMoveLimitCollision(sceneObjHolder: SceneObjHolder, actor: LiveAct
         return false;
 
     vec3.scaleAndAdd(scratchVec3a, actor.translation, actor.gravityVector, -150.0);
-    vec3.scaleAndAdd(scratchVec3b, actor.translation, actor.gravityVector, 1000.0);
+    vec3.scale(scratchVec3b, actor.gravityVector, 1000.0);
 
     const moveLimitKeeper = collisionDirector.keepers[CollisionKeeperCategory.MoveLimit];
     const mapKeeper = collisionDirector.keepers[CollisionKeeperCategory.Map];
@@ -8439,7 +8439,7 @@ export class StinkBugSmall extends StinkBugBase<StinkBugSmallNrv> {
                 startBck(this, `RushStart`);
 
             this.fixInitPos();
-            this.tryTurnDashSign(sceneObjHolder, 3.0);
+            this.tryTurnDashSign(sceneObjHolder, 3.0 * deltaTimeFrames);
             if (isBckStopped(this))
                 this.setNerve(StinkBugSmallNrv.DashSignEnd);
         } else if (currentNerve === StinkBugSmallNrv.DashSignEnd) {

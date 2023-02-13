@@ -3,7 +3,8 @@ import { ReadonlyVec4, vec4 } from "gl-matrix";
 import ArrayBufferSlice from "../ArrayBufferSlice";
 import { convertToTrianglesRange, getTriangleIndexCountForTopologyIndexCount, GfxTopology } from "../gfx/helpers/TopologyHelpers";
 import { LightmapPackerPage } from "../SourceEngine/BSPFile";
-import { assert, readString } from "../util";
+import { pairs2obj, ValveKeyValueParser, VKFPair } from "../SourceEngine/VMT";
+import { assert, decodeString, readString } from "../util";
 
 const enum LumpType {
     ENTITIES = 0,
@@ -54,9 +55,26 @@ export interface Surface {
     lightmapData: SurfaceLightmapData[];
 }
 
+export interface BSPEntity {
+    classname: string;
+    [k: string]: string;
+}
+
+function parseEntitiesLump(str: string): BSPEntity[] {
+    const p = new ValveKeyValueParser(str);
+    const entities: BSPEntity[] = [];
+    while (p.hastok()) {
+        entities.push(pairs2obj(p.unit() as VKFPair[]) as BSPEntity);
+        p.skipwhite();
+    }
+    return entities;
+}
+
 export class BSPFile {
     public version: number;
 
+    private entitiesStr: string; // For debugging.
+    public entities: BSPEntity[] = [];
     public indexData: ArrayBuffer;
     public vertexData: ArrayBuffer;
     public surfaces: Surface[] = [];
@@ -75,6 +93,10 @@ export class BSPFile {
             const size = view.getUint32(idx + 0x04, true);
             return buffer.subarray(offs, size);
         }
+
+        // Parse out entities.
+        this.entitiesStr = decodeString(getLumpData(LumpType.ENTITIES));
+        this.entities = parseEntitiesLump(this.entitiesStr);
 
         function readVec4(view: DataView, offs: number): vec4 {
             const x = view.getFloat32(offs + 0x00, true);
@@ -201,8 +223,8 @@ export class BSPFile {
                 const py = vertexes[vertIndex * 3 + 1];
                 const pz = vertexes[vertIndex * 3 + 2];
 
-                const texCoordS = px*m.s[0] + py*m.s[1] + pz*m.s[2] + m.s[3];
-                const texCoordT = px*m.t[0] + py*m.t[1] + pz*m.t[2] + m.t[3];
+                const texCoordS = Math.fround(px*m.s[0] + py*m.s[1] + pz*m.s[2] + m.s[3]);
+                const texCoordT = Math.fround(px*m.t[0] + py*m.t[1] + pz*m.t[2] + m.t[3]);
 
                 vertexData[dstOffsVertex++] = px;
                 vertexData[dstOffsVertex++] = py;
@@ -221,8 +243,9 @@ export class BSPFile {
                 maxTexCoordT = Math.max(maxTexCoordT, texCoordT);
             }
 
-            const surfaceW = Math.ceil((maxTexCoordS / 16)) - Math.floor(minTexCoordS / 16) + 1;
-            const surfaceH = Math.ceil((maxTexCoordT / 16)) - Math.floor(minTexCoordT / 16) + 1;
+            const lightmapScale = 1 / 16;
+            const surfaceW = Math.ceil((maxTexCoordS * lightmapScale)) - Math.floor(minTexCoordS * lightmapScale) + 1;
+            const surfaceH = Math.ceil((maxTexCoordT * lightmapScale)) - Math.floor(minTexCoordT * lightmapScale) + 1;
 
             const lightmapSamplesSize = (surfaceW * surfaceH * styles.length * 3);
             const samples = lightofs !== 0xFFFFFFFF ? lighting.subarray(lightofs, lightmapSamplesSize).createTypedArray(Uint8Array) : null;
@@ -236,16 +259,16 @@ export class BSPFile {
             assert(this.lightmapPackerPage.allocate(lightmapData));
 
             // Fill in UV
-            for (let i = 0; i < numedges; i++) {
-                let offs = dstOffsVertexBase + (i * 7) + 3;
+            for (let j = 0; j < numedges; j++) {
+                let offs = dstOffsVertexBase + (j * 7) + 3;
 
                 const texCoordS = vertexData[offs++];
                 const texCoordT = vertexData[offs++];
 
-                const lightmapCoordS = lightmapData.pagePosX + (texCoordS - Math.floor(minTexCoordS)) / 16;
-                const lightmapCoordT = lightmapData.pagePosY + (texCoordT - Math.floor(minTexCoordT)) / 16;
-                vertexData[offs++] = lightmapCoordS;
-                vertexData[offs++] = lightmapCoordT;
+                const lightmapCoordS = (texCoordS * lightmapScale) - Math.floor(minTexCoordS * lightmapScale) + 0.5;
+                const lightmapCoordT = (texCoordT * lightmapScale) - Math.floor(minTexCoordT * lightmapScale) + 0.5;
+                vertexData[offs++] = lightmapData.pagePosX + lightmapCoordS;
+                vertexData[offs++] = lightmapData.pagePosY + lightmapCoordT;
             }
 
             const indexCount = getTriangleIndexCountForTopologyIndexCount(GfxTopology.TriFans, numedges);
@@ -267,5 +290,26 @@ export class BSPFile {
 
         this.vertexData = vertexData.buffer as ArrayBuffer;
         this.indexData = indexData.buffer as ArrayBuffer;
+    }
+
+    public getWadList(): string[] {
+        const worldspawn = this.entities[0];
+        assert(worldspawn.classname === 'worldspawn');
+
+        const wad = worldspawn.wad;
+        return wad.split(';').map((v) => {
+            // Replace the initial mount name.
+            assert(v.startsWith('\\'));
+            const x = v.split('\\');
+            x.shift();
+            x.shift();
+            return x.join('/');
+        }).filter((v) => {
+            // remove non-existent files
+            if (v === 'valve/sample.wad')
+                return false;
+
+            return true;
+        });
     }
 }

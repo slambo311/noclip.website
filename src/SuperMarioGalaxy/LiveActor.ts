@@ -302,7 +302,7 @@ export function initEachResTable<T>(arc: JKRArchive, table: ResTable<T>, extensi
             const ext = extensions[j];
             if (file.name.endsWith(ext)) {
                 const filenameWithoutExtension = file.name.slice(0, -ext.length).toLowerCase();
-                const key = includeExtension ? file.name : filenameWithoutExtension;
+                const key = includeExtension ? file.name.toLowerCase() : filenameWithoutExtension;
                 table.set(key, constructor(file, ext, filenameWithoutExtension));
             }
         }
@@ -812,8 +812,7 @@ export class LiveActor<TNerve extends number = number> extends NameObj {
         // disconnectToDrawTemporarily
     }
 
-    public override scenarioChanged(sceneObjHolder: SceneObjHolder): void {
-        const newVisibleScenario = sceneObjHolder.spawner.checkAliveScenario(this.zoneAndLayer);
+    protected setVisibleScenario(sceneObjHolder: SceneObjHolder, newVisibleScenario: boolean): void {
         if (this.visibleScenario === newVisibleScenario)
             return;
 
@@ -822,6 +821,10 @@ export class LiveActor<TNerve extends number = number> extends NameObj {
             this.onScenario(sceneObjHolder);
         else
             this.offScenario(sceneObjHolder);
+    }
+
+    public override scenarioChanged(sceneObjHolder: SceneObjHolder): void {
+        this.setVisibleScenario(sceneObjHolder, sceneObjHolder.spawner.checkAliveScenario(this.zoneAndLayer));
     }
 
     // noclip hook for scenario changing.

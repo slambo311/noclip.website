@@ -278,10 +278,10 @@ export class SkyboxRenderer {
         this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, indexData.buffer);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
-            { location: MaterialShaderTemplateBase.a_Position, bufferIndex: 0, bufferByteOffset: 0*0x04, format: GfxFormat.F32_RGB, },
-            { location: MaterialShaderTemplateBase.a_TexCoord, bufferIndex: 0, bufferByteOffset: 3*0x04, format: GfxFormat.F32_RG, },
-            { location: MaterialShaderTemplateBase.a_Normal,   bufferIndex: 1, bufferByteOffset: 0, format: GfxFormat.F32_RGBA, },
-            { location: MaterialShaderTemplateBase.a_TangentS, bufferIndex: 1, bufferByteOffset: 0, format: GfxFormat.F32_RGBA, },
+            { location: MaterialShaderTemplateBase.a_Position,   bufferIndex: 0, bufferByteOffset: 0*0x04, format: GfxFormat.F32_RGB, },
+            { location: MaterialShaderTemplateBase.a_TexCoord01, bufferIndex: 0, bufferByteOffset: 3*0x04, format: GfxFormat.F32_RG, },
+            { location: MaterialShaderTemplateBase.a_Normal,     bufferIndex: 1, bufferByteOffset: 0, format: GfxFormat.F32_RGBA, },
+            { location: MaterialShaderTemplateBase.a_TangentS,   bufferIndex: 1, bufferByteOffset: 0, format: GfxFormat.F32_RGBA, },
         ];
         const vertexBufferDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: (3+2)*0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
@@ -688,10 +688,10 @@ export class BSPRenderer {
         this.indexBuffer = makeStaticDataBuffer(device, GfxBufferUsage.Index, this.bsp.indexData);
 
         const vertexAttributeDescriptors: GfxVertexAttributeDescriptor[] = [
-            { location: MaterialShaderTemplateBase.a_Position, bufferIndex: 0, bufferByteOffset: 0*0x04, format: GfxFormat.F32_RGB, },
-            { location: MaterialShaderTemplateBase.a_Normal,   bufferIndex: 0, bufferByteOffset: 3*0x04, format: GfxFormat.F32_RGBA, },
-            { location: MaterialShaderTemplateBase.a_TangentS, bufferIndex: 0, bufferByteOffset: 7*0x04, format: GfxFormat.F32_RGBA, },
-            { location: MaterialShaderTemplateBase.a_TexCoord, bufferIndex: 0, bufferByteOffset: 11*0x04, format: GfxFormat.F32_RGBA, },
+            { location: MaterialShaderTemplateBase.a_Position,   bufferIndex: 0, bufferByteOffset: 0*0x04, format: GfxFormat.F32_RGB, },
+            { location: MaterialShaderTemplateBase.a_Normal,     bufferIndex: 0, bufferByteOffset: 3*0x04, format: GfxFormat.F32_RGBA, },
+            { location: MaterialShaderTemplateBase.a_TangentS,   bufferIndex: 0, bufferByteOffset: 7*0x04, format: GfxFormat.F32_RGBA, },
+            { location: MaterialShaderTemplateBase.a_TexCoord01, bufferIndex: 0, bufferByteOffset: 11*0x04, format: GfxFormat.F32_RGBA, },
         ];
         const vertexBufferDescriptors: GfxInputLayoutBufferDescriptor[] = [
             { byteStride: (3+4+4+4)*0x04, frequency: GfxVertexBufferFrequency.PerVertex, },
@@ -1150,21 +1150,22 @@ export class SourceRenderContext {
 }
 
 const bindingLayouts: GfxBindingLayoutDescriptor[] = [
-    { numUniformBuffers: 3, numSamplers: 14, samplerEntries: [
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 0
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 1
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 2
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 3
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 4
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 5
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 6
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 7
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 8
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 9
-        { dimension: GfxTextureDimension.n2DArray, formatKind: GfxSamplerFormatKind.Float, }, // 10
-        { dimension: GfxTextureDimension.Cube, formatKind: GfxSamplerFormatKind.Float, },     // 11
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Depth, },      // 12
-        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },      // 13
+    { numUniformBuffers: 3, numSamplers: 15, samplerEntries: [
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 0
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 1
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 2
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 3
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 4
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 5
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 6
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 7
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 8
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 9
+        { dimension: GfxTextureDimension.n2DArray, formatKind: GfxSamplerFormatKind.Float, },             // 10
+        { dimension: GfxTextureDimension.Cube, formatKind: GfxSamplerFormatKind.Float, },                 // 11
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Depth, comparison: true }, // 12
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Float, },                  // 13
+        { dimension: GfxTextureDimension.n2D, formatKind: GfxSamplerFormatKind.Depth, },                  // 14
     ] },
 ];
 
